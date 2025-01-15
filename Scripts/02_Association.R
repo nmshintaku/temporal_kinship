@@ -5,13 +5,13 @@
 library(SocGen)
 library(igraph)
 
-load("IntermediateData/kfinal1000.RData")
+load("Outputs/kfinal1000.RData")
 
-indiv_covars <- read.csv("SharedData/individual_covariates.csv")
+indiv_covars <- read.csv("Data/individual_covariates.csv")
 indiv_covars$entry <- as.Date(indiv_covars$entry)
 indiv_covars$depart <- as.Date(indiv_covars$depart)
 
-sightings <- read.csv("SharedData/sightings.csv")
+sightings <- read.csv("Data/sightings.csv")
 
 dates <- sort(unique(sightings$Date))
 
@@ -76,4 +76,4 @@ stopCluster(cl)
 endtime - starttime # expected run time ~3 min
 
 
-save(masked_network, ai_affil_rand, file = "IntermediateData/affiliation_networks.RData")
+save(masked_network, ai_affil_rand, file = "Outputs/affiliation_networks.RData")
