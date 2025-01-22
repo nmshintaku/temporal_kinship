@@ -19,7 +19,7 @@ repro$deathdate <- lh$Death.Date[match(
 
 #Filter out calves; individuals older than 4 yrs
 adultF <- repro %>%
-  filter(mature == "yes")
+  filter(age > 4)
 
 #Calculate total number of sightings 
 totalsightings <- adultF %>%
@@ -29,6 +29,7 @@ totalsightings <- adultF %>%
 #Now filtering for minimum of 10 sightings
 filtered_sightings <- totalsightings %>%
   filter(Sightings >= 10)
+#write.csv(filtered_sightings, "Outputs/filtered_sightings.csv", row.names = FALSE)
 
 ##################
 #Individual Covars
@@ -47,19 +48,74 @@ dates <- dates %>%
 
 individual_covariates <- individual_covariates %>% left_join(dates %>% select(Dolphin.ID, Turned4Date, deathdate), by = "Dolphin.ID")
 
-#Filtering out last observation date of the year 2024
-obs2024 <- filtered_survey %>%
-  filter(year(Observation.Date) == 2024) %>%
-  group_by(Dolphin.ID) %>%
-  summarise(LastObs = max(Observation.Date)) %>%
-  ungroup()
+individual_covariates <- individual_covariates %>%
+  mutate(deathdate = if_else(is.na(deathdate), as.Date("2024-11-30"), deathdate))
+
+#OLD STEPS for reference only 
+#Filtering out individual's last observation date of the year 2024
+#obs2024 <- filtered_survey %>%
+ # filter(year(Observation.Date) == 2024) %>%
+  #group_by(Dolphin.ID) %>%
+  #summarise(LastObs = max(Observation.Date)) %>%
+  #ungroup()
 #if depart/death date is na, put 2024 last observation date
-individual_covariates <- individual_covariates %>% 
-  left_join(obs2024, by = "Dolphin.ID") %>%
-  mutate(deathdate = if_else(is.na(deathdate), LastObs, deathdate)) %>%
-  select(-LastObs)
+#individual_covariates <- individual_covariates %>% 
+ # left_join(obs2024, by = "Dolphin.ID") %>%
+  #mutate(deathdate = if_else(is.na(deathdate), LastObs, deathdate)) %>%
+  #select(-LastObs)
 
 individual_covariates <- individual_covariates %>% rename(departdate = deathdate)
+individual_covariates <- individual_covariates %>% rename(entrydate = Turned4Date)
 
-#THERE ARE STILL NAs IN DEPART DATE
 write.csv(individual_covariates, "Outputs/individual_covariates.csv", row.names = FALSE)
+
+
+##################
+#Sightings
+##################
+
+adultF$Observation.Date <- as.Date(adultF$Observation.Date)
+
+#Creating age class
+adultF <- adultF %>%
+  mutate(AgeClass = case_when(
+    age >= 4 & age < 10 ~ "juvenile",
+    age >= 10 & age <= 30 ~ "adult",
+    age > 30 ~ "elder",
+    TRUE ~ NA_character_
+  ))
+
+#Creating reproductive categories
+adultF <- adultF %>%
+  mutate(ReproCat = case_when(
+    pregnant == 1 ~ "preg",
+    lactating == 1 ~ "lact",
+    cycling == 1 ~ "cyc",
+    TRUE ~ NA_character_
+  )) %>%
+  mutate(ReproCat = case_when(
+    !is.na(ReproCat) ~ ReproCat,
+    is.na(ReproCat) & AgeClass == "juvenile" ~ "juvenile",
+    TRUE ~ "unknown"
+  ))
+  
+sightings <- adultF %>%
+  select(Dolphin.ID, Observation.Date) %>%
+  left_join(filtered_survey %>% select(Dolphin.ID, Observation.Date, Observation.ID), by = c("Dolphin.ID", "Observation.Date")) %>%
+  left_join(adultF %>% select(Dolphin.ID, Observation.Date, AgeClass, ReproCat),
+            by = c("Dolphin.ID", "Observation.Date")) %>%
+  mutate(Combined.ID = paste(Dolphin.ID, ReproCat, AgeClass, sep = ".")) %>%
+  group_by(ReproCat) %>%
+  mutate(ReproSightings = n()) %>%
+  ungroup()
+
+#Making sure to filter individuals with minimum 10 sightings
+sightings <- sightings %>%
+  filter(Dolphin.ID %in% filtered_sightings$Dolphin.ID)
+
+write.csv(sightings, "Outputs/sightings.csv", row.names = FALSE)
+#write.csv(adultF, "outputs/adultF_filtered.csv", row.names = FALSE)
+
+
+
+
