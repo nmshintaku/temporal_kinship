@@ -41,9 +41,27 @@ affil_mask <- schedulize(affil_females,
 
 affil_sightings <- sightings[which(sightings$Combined.ID %in% affil_females$Combined.ID), ]
 
-masked_network <- half_weight(sightings = affil_sightings,
+masked_network <- simple_ratio(sightings = affil_sightings,
                               group_variable = "Observation.ID",
                               dates = "Observation.Date",
                               IDs = "Combined.ID",
                               mask = affil_mask)
+
+# For each female reprocat combination, sum up per reprocat and per relatedness cat 
+
+# Create a network object
+
+masked_network[is.nan(masked_network)] <- 0
+masked_network[is.na(masked_network)] <- 0
+
+network <- graph_from_adjacency_matrix(masked_network, mode = "undirected", weighted = TRUE)
+
+# calculate strength (summed edge weights) per ID
+strength(network)
+
+
+
+
+
+
 
