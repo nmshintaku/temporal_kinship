@@ -5,75 +5,45 @@
 library(SocGen)
 library(igraph)
 
-#load("Outputs/kfinal1000.RData")
+indiv_covars <- read.csv("Outputs/individual_covariates.csv")
+indiv_covars$entrydate <- as.Date(indiv_covars$entrydate)
+indiv_covars$departdate <- as.Date(indiv_covars$departdate)
 
-indiv_covars <- read.csv("Data/individual_covariates.csv")
-indiv_covars$entry <- as.Date(indiv_covars$entry)
-indiv_covars$depart <- as.Date(indiv_covars$depart)
+sightings <- read.csv("Outputs/sightings.csv")
 
-sightings <- read.csv("Data/sightings.csv")
+dates <- sort(unique(sightings$Observation.Date))
 
-dates <- sort(unique(sightings$Date))
+#count repro sightings
 
-# select pairs to from which to determine affiliations
-# affiliated pairs are calculated between all individuals with at least 2 years postweaning, 35 relocations and 20 sightings in which group associations were recorded and who have been genotyped
+rs_tab <- table(sightings$Combined.ID)
+sightings$ReproSightings <- rs_tab[match(sightings$Combined.ID, names(rs_tab))]
 
-affil_females <- indiv_covars[which(indiv_covars$total_yrs >= 2 &
-                                      indiv_covars$genotyped == "Y" &
-                                      indiv_covars$relocations >= 35 &
-                                      indiv_covars$num_sightings >= 20), ]
+# select just genotyped individuals
+
+relatedness <- read.csv("Raw Data/RelatednessEstimates_2024.csv")
+genotypes <- unique(c(relatedness$ID1, relatedness$ID2))
+
+indiv_covars$genotyped <- ifelse(indiv_covars$Dolphin.ID %in% genotypes, "Y", "N")
+
+statuses <- sightings[,c("Dolphin.ID", "Combined.ID")] |> unique()
+
+affil_females <- merge(statuses, indiv_covars, by = "Dolphin.ID", all.x = TRUE)
+
+affil_females <- affil_females[which(affil_females$genotyped == "Y"), ]
 
 # mask the data so that association rates are only estimated in the timeframe where both members are alive
 affil_mask <- schedulize(affil_females,
-                         id = "Dolphin.ID",
-                         start = "entry",
-                         end = "depart",
+                         id = "Combined.ID",
+                         start = "entrydate",
+                         end = "departdate",
                          dates = dates,
                          format = "mask")
 
-affil_sightings <- sightings[sightings$Dolphin.ID %in% affil_females$Dolphin.ID, ]
+affil_sightings <- sightings[which(sightings$Combined.ID %in% affil_females$Combined.ID), ]
 
 masked_network <- half_weight(sightings = affil_sightings,
                               group_variable = "Observation.ID",
-                              dates = "Date",
-                              IDs = "Dolphin.ID",
+                              dates = "Observation.Date",
+                              IDs = "Combined.ID",
                               mask = affil_mask)
 
-# repeat for the results of the random model
-
-library(foreach)
-library(doParallel)
-
-cl <- makeCluster(detectCores() - 1)
-clusterEvalQ(cl, {library(SocGen)})
-clusterExport(cl, c("kfinal", "affil_mask", "affil_females"))
-registerDoParallel(cl)
-
-starttime <- Sys.time()
-
-ai_affil_rand <- foreach(n = 1:length(kfinal), .errorhandling = 'pass') %dopar% {
-  
-  kfinal1 <- kfinal[[n]]
-  kfinal1$Date <- substring(kfinal1$group, 1, 10)
-  
-  affil_kfinal1 <- kfinal1[kfinal1$id %in% affil_females$Dolphin.ID, ]
-  
-  masked_network <- half_weight(sightings = affil_kfinal1,
-                                group_variable = "group",
-                                dates = "Date",
-                                IDs = "id",
-                                mask = affil_mask)
-  
-  cat(paste0(" network complete for number ", n, "\n"))
-  
-  masked_network
-}
-
-endtime <- Sys.time()
-
-stopCluster(cl)
-
-endtime - starttime # expected run time ~3 min
-
-
-save(masked_network, ai_affil_rand, file = "Outputs/affiliation_networks.RData")
