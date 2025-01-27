@@ -48,6 +48,15 @@ dyad <- relatedness %>%
 combinations <- combinations %>%
   left_join(dyad, by = "IDPair")
 
-write.csv(combinations, "Outputs/pairwise_covariates.csv", row.names = FALSE)
+#write.csv(combinations, "Outputs/pairwise_covariates.csv", row.names = FALSE)
+
+#Create column for close kin
+pairwise <- read.csv("Outputs/pairwise_covariates.csv")
+
+pairwise <- pairwise %>%
+  mutate(Closekin = ifelse(is.na(DyadML) | DyadML < 0.125, "N","Y"))
+
+write.csv(pairwise, "Outputs/pairwise_covariates.csv", row.names = FALSE)
+
 
 

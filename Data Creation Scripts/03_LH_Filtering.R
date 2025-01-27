@@ -113,6 +113,10 @@ sightings <- adultF %>%
 sightings <- sightings %>%
   filter(Dolphin.ID %in% filtered_sightings$Dolphin.ID)
 
+#calculate repro sightings per individual
+rs_tab <- table(sightings$Combined.ID)
+sightings$ReproSightings <- rs_tab[match(sightings$Combined.ID, names(rs_tab))]
+
 write.csv(sightings, "Outputs/sightings.csv", row.names = FALSE)
 #write.csv(adultF, "outputs/adultF_filtered.csv", row.names = FALSE)
 

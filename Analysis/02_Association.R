@@ -60,6 +60,8 @@ network <- graph_from_adjacency_matrix(masked_network, mode = "undirected", weig
 strength(network)
 
 
+plot(network)
+
 
 
 
