@@ -4,6 +4,7 @@
 
 library(SocGen)
 library(igraph)
+library(dplyr)
 
 indiv_covars <- read.csv("Outputs/individual_covariates.csv")
 indiv_covars$entrydate <- as.Date(indiv_covars$entrydate)
@@ -13,10 +14,15 @@ sightings <- read.csv("Outputs/sightings.csv")
 
 dates <- sort(unique(sightings$Observation.Date))
 
+#Adding separate columns for Repro.ID and Age.ID
+sightings <- sightings %>%
+  mutate(Repro.ID = sub("^([^.]+\\.[^.]+).*", "\\1", Combined.ID)) %>%
+  mutate(Age.ID = paste(sub("\\..*", "", Combined.ID), sub(".*\\.(\\w+)$", "\\1", Combined.ID), sep = "."))
+
 #count repro sightings
 
 rs_tab <- table(sightings$Combined.ID)
-sightings$ReproSightings <- rs_tab[match(sightings$Combined.ID, names(rs_tab))]
+sightings$ReproSightings <- rs_tab
 
 # select just genotyped individuals
 
@@ -31,6 +37,11 @@ affil_females <- merge(statuses, indiv_covars, by = "Dolphin.ID", all.x = TRUE)
 
 affil_females <- affil_females[which(affil_females$genotyped == "Y"), ]
 
+#Adding separate columns for Repro.ID and Age.ID
+affil_females <- affil_females %>%
+  mutate(Repro.ID = sub("^([^.]+\\.[^.]+).*", "\\1", Combined.ID)) %>%
+  mutate(Age.ID = paste(sub("\\..*", "", Combined.ID), sub(".*\\.(\\w+)$", "\\1", Combined.ID), sep = "."))
+
 # mask the data so that association rates are only estimated in the timeframe where both members are alive
 affil_mask <- schedulize(affil_females,
                          id = "Combined.ID",
@@ -41,6 +52,12 @@ affil_mask <- schedulize(affil_females,
 
 affil_sightings <- sightings[which(sightings$Combined.ID %in% affil_females$Combined.ID), ]
 
+#Adding separate columns for Repro.ID and Age.ID
+affil_sightings <- affil_sightings %>%
+  mutate(Repro.ID = sub("^([^.]+\\.[^.]+).*", "\\1", Combined.ID)) %>%
+  mutate(Age.ID = paste(sub("\\..*", "", Combined.ID), sub(".*\\.(\\w+)$", "\\1", Combined.ID), sep = "."))
+
+#Calculating SRI
 masked_network <- simple_ratio(sightings = affil_sightings,
                               group_variable = "Observation.ID",
                               dates = "Observation.Date",
@@ -59,11 +76,85 @@ network <- graph_from_adjacency_matrix(masked_network, mode = "undirected", weig
 # calculate strength (summed edge weights) per ID
 strength(network)
 
+#########
+##Repro##
+#########
 
-plot(network)
+# mask the data so that association rates are only estimated in the timeframe where both members are alive
+affil_mask_repro <- schedulize(affil_females,
+                         id = "Repro.ID",
+                         start = "entrydate",
+                         end = "departdate",
+                         dates = dates,
+                         format = "mask")
 
+repro_mask_network <- simple_ratio(sightings = affil_sightings,
+                               group_variable = "Observation.ID",
+                               dates = "Observation.Date",
+                               IDs = "Repro.ID",
+                               mask = affil_mask_repro)
 
+repro_mask_network[is.nan(repro_mask_network)] <- 0
+repro_mask_network[is.na(repro_mask_network)] <- 0
 
+repro_network <- graph_from_adjacency_matrix(repro_mask_network, mode = "undirected", weighted = TRUE)
 
+str_repro <- strength(repro_network)
+str_repro_df <- data.frame(name = V(repro_network)$name, strength = str_repro)
+write.csv(str_repro_df, "Outputs/repro_strength.csv", row.names = FALSE)
 
+merge_repro_str <- merge(sightings, str_repro_df, by.x = "Repro.ID", by.y = "name", all.x = TRUE)
 
+#Setting vertex attributes to each reproductive category
+repro_network <- set_vertex_attr(repro_network, "ReproCat",
+                                 value = sightings$ReproCat[match(V(repro_network)$name, sightings$Repro.ID)])
+
+#OTHER WAY TO SET VERTEX ATTRIBUTE
+#matched_indices <- match(V(repro_network)$name, sightings$Repro.ID)
+# if (any(is.na(matched_indices))) {
+#   warning("There are unmatched IDs. Please check your data.")
+# } else {
+#   # Set the ReproCat attribute
+#   V(repro_network)$ReproCat <- sightings$ReproCat[matched_indices]
+# }
+
+layout <- layout_with_kk(repro_network)
+
+plot(repro_network, 
+     layout = layout, 
+     vertex.label.dist = 3.5, 
+     vertex.color = as.factor(V(repro_network)$ReproCat))
+
+preg_graph <- induced_subgraph(repro_network, which(V(repro_network)$ReproCat == "preg"))
+plot(preg_graph, layout = layout_with_fr)
+mean(degree(preg_graph))
+
+#########
+###Age###
+#########
+
+affil_mask_age <- schedulize(affil_females,
+                               id = "Age.ID",
+                               start = "entrydate",
+                               end = "departdate",
+                               dates = dates,
+                               format = "mask")
+
+age_mask_network <- simple_ratio(sightings = affil_sightings,
+                                   group_variable = "Observation.ID",
+                                   dates = "Observation.Date",
+                                   IDs = "Age.ID",
+                                   mask = affil_mask_age)
+
+age_mask_network[is.nan(age_mask_network)] <- 0
+age_mask_network[is.na(age_mask_network)] <- 0
+
+age_network <- graph_from_adjacency_matrix(age_mask_network, mode = "undirected", weighted = TRUE)
+
+str_age <- strength(age_network)
+str_age_df <- data.frame(name = V(age_network)$name, strength = str_age)
+write.csv(str_age_df, "Outputs/age_strength.csv", row.names = FALSE)
+
+#Setting vertex attributes to each age class
+age_network <- set_vertex_attr(age_network, "AgeClass",
+                                 value = sightings$AgeClass[match(V(age_network)$name, sightings$Age.ID)])
