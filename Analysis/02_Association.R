@@ -188,3 +188,5 @@ age_network <- set_vertex_attr(age_network, "AgeClass",
 #Combining all the strength calculations into one dataframe
 all_strength <- merge(str_repro_df, str_age_df, by = "Dolphin.ID", all.x = TRUE)
 write.csv(all_strength, "Outputs/all_strength.csv", row.names = FALSE)
+
+
