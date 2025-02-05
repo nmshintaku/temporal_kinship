@@ -71,15 +71,29 @@ masked_network <- simple_ratio(sightings = affil_sightings,
 masked_network[is.nan(masked_network)] <- 0
 masked_network[is.na(masked_network)] <- 0
 
-network <- graph_from_adjacency_matrix(masked_network, mode = "undirected", weighted = TRUE)
+combined_list <- mat2dat(masked_network, value.name = "weight")
 
-combined_list <- mat2dat(masked_network)
+#Set kinship as the edge attribute 
 
-#code not working, but pairs don't match in names 
-combined_pairs <- merge_pairs(combined_list, pairwise, xID1 = "ID1", xID2 = "ID2", yID1 = "Dolphin 1", yID2 = "Dolphin 2")
+#create list of all pairwise combinations of combined IDs
 
-edge_ids <- get.edge.ids(network, combined_list)
+combined_list$Dolphin.ID1 <- affil_females$Dolphin.ID[match(combined_list$ID1, affil_females$Combined.ID)]
+combined_list$Dolphin.ID2 <- affil_females$Dolphin.ID[match(combined_list$ID2, affil_females$Combined.ID)]
 
+combined_pairs <- merge_pairs(combined_list, pairwise, 
+                              xID1 = "Dolphin.ID1", xID2 = "Dolphin.ID2", 
+                              yID1 = "Dolphin1", yID2 = "Dolphin2", 
+                              all.x = TRUE, all.y = FALSE)
+
+combined_pairs <- combined_pairs[which(combined_pairs$weight!= 0),]
+combined_pairs <- reduce_pairs(combined_pairs, ID1 = "ID1", ID2 = "ID2")
+
+#recreate network from data frame
+
+network <- graph_from_data_frame(combined_pairs[,c("ID1", "ID2", "weight", "DyadML", "Closekin")], 
+                                 directed = FALSE)
+
+kin_graph <- subgraph_from_edges(network, eids = E(network)[E(network)$Closekin == "Y"])
 
 #########
 ##Repro##
