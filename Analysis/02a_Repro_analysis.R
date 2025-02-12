@@ -1,4 +1,4 @@
-#02 Association Scratch script (Repro)
+#02a Association Scratch script (Repro)
 
 library(SocGen)
 library(igraph)
@@ -95,6 +95,21 @@ network <- graph_from_data_frame(combined_pairs[,c("ID1", "ID2", "weight", "Dyad
 
 kin_graph <- subgraph_from_edges(network, eids = E(network)[E(network)$Closekin == "Y"])
 
+#divide close kin by total strength per individual (female) (and then could normalize after)
+#just raw numbers
+#normalize within kin
+#treating network same way
+
+#might want to look at matrilinearl close kind eventually 
+
+#Calculating kin strength
+str_kin <- strength(kin_graph)
+str_kin_df <- data.frame(name = V(kin_graph)$name, strength = str_kin)
+
+affil_females <- merge(affil_females, str_kin_df, by.x = "Combined.ID", by.y = "name", all.x = TRUE)
+affil_females <- affil_females %>% rename(kin.strength = strength)
+
+
 #########
 ##Repro##
 #########
@@ -132,30 +147,11 @@ affil_sightings <- affil_sightings %>% rename(repro.strength = strength)
 repro_network <- set_vertex_attr(repro_network, "ReproCat",
                                  value = sightings$ReproCat[match(V(repro_network)$name, sightings$Repro.ID)])
 
-#Setting edge attributes for close kin
-repro_pairwise <- mat2dat
-repro_pairwise <- repro_pairwise1 %>%
-  mutate(
-    ID1_pre = sub("\\..*", "", ID1),
-    ID2_pre = sub("\\..*","", ID2),
-    IDPair = paste(ID1_pre, ID2_pre, sep = ".")
-  ) %>%
-  distinct(IDPair, .keep_all = TRUE)
-
-repro_pairwise <- repro_pairwise %>%
-  filter(IDPair %in% pairwise$IDPair)
-
-repro_pairwise <- repro_pairwise %>%
-  left_join(pairwise %>% select(IDPair, Closekin), by = "IDPair")
-
-edge_ids <- get.edge.ids(repro_network, repro_pairwise)
-
-repro_network <- set_edge_attr(repro_network, "CloseKin",
-                               value = repro_pairwise$Closekin[match(V(repro_network)$name, repro_pairwise$IDPair)])
 
 ###############
 #Repro Analysis
 ###############
+
 #Average raw value per repro category across all females
 lact <- affil_females %>%
   filter(grepl("\\.lact$", Repro.ID)) %>%
@@ -175,7 +171,7 @@ juvenile <- affil_females %>%
 
 avg_repro_strength <- bind_cols(cyc, juvenile, lact, preg)
 
-#Normalize avg value of each repro category 
+#STEP 1 Normalize avg value of each repro category 
 #Dividing repro.strength of each individual by the average of the respective repro category 
 
 extract_state <- function(Repro.ID) {
@@ -195,49 +191,87 @@ affil_females$norm_repro[affil_females$norm_repro == "character(0)"] <- NA
 #filter out unknown ReproCat
 no_unk_affil <- subset(affil_females, ReproCat != "unknown")
 no_unk_affil$norm_repro <- as.numeric(no_unk_affil$norm_repro) 
-avg_norm_repro <- aggregate(norm_repro ~ ReproCat, no_unk_affil, mean)
-# print(avg_norm_repro)
 
-ggplot(no_unk_affil, aes(x = ReproCat, y = norm_repro, fill = ReproCat)) +
-  geom_boxplot() +
-  labs(x = "Repro State", y = "Normalized Strength") +
-  theme_minimal() +
-  theme(legend.position = "none")
-
-#STEP 2 Normalizing by individual level
-
-#Filter out reprosightings >= 5 from affil_sightings
+#Filter out repro sightings >= 5 from affil_sightings
 filtered_sightings <- affil_sightings %>% filter(ReproSightings >= 5)
-
 no_unk_affil <- no_unk_affil %>%
   filter(Combined.ID %in% filtered_sightings$Combined.ID)
+
+#STEP 2 Normalizing by individual level
 
 #Calculating total average strength per individual across all states
 no_unk_affil <- no_unk_affil %>%
   group_by(Dolphin.ID) %>%
   mutate(avg.tot.str = mean(repro.strength),
-         norm.repro.indiv = avg.tot.str / repro.strength)
+         norm.repro.indiv = repro.strength / avg.tot.str)
 #No Nan or inf
 clean_affil <- no_unk_affil %>%
   filter(!is.nan(norm.repro.indiv) & !is.infinite(norm.repro.indiv))
 
-#plot normalized values with average shown across each state
-means <- clean_affil %>%
+#Plot repro strength normalized to individual with average shown across each state
+means_indiv <- clean_affil %>%
   group_by(ReproCat) %>%
   summarise(mean_value = mean(norm.repro.indiv, na.rm = TRUE))
 
 ggplot(clean_affil, aes(x = ReproCat, y = norm.repro.indiv, fill = ReproCat)) +
   geom_boxplot() +
-  geom_segment(data = means, aes(x = as.numeric(ReproCat) - 0.2, xend = as.numeric(ReproCat) + 0.2,
+  geom_segment(data = means_indiv, aes(x = as.numeric(ReproCat) - 0.2, xend = as.numeric(ReproCat) + 0.2,
                                  y = mean_value, yend = mean_value), color = "black", size = 1) +
-  geom_text(data = means, aes(x = ReproCat, y = mean_value, label = round(mean_value, 2)),
+  geom_text(data = means_indiv, aes(x = ReproCat, y = mean_value, label = round(mean_value, 2)),
             vjust = -0.5, color = "black") +
-  labs(x = "Repro State", y = "Normalized Strength") +
+  labs(x = "Repro State", y = "Normalized Strength to Individual") +
   theme_minimal() +
   theme(legend.position = "none")
 
-ggplot(means, aes(x = ReproCat, y = mean_value, fill = ReproCat)) +
+
+#Repro strength normalized strength to the category level
+means_norm <- clean_affil %>%
+  group_by(ReproCat) %>%
+  summarise(mean_value = mean(norm_repro, na.rm = TRUE))
+
+ggplot(clean_affil, aes(x = ReproCat, y = norm_repro, fill = ReproCat)) +
   geom_boxplot() +
-  labs(x = "Repro State", y = "Normalized Strength")+
+  geom_segment(data = means_norm, aes(x = as.numeric(ReproCat) - 0.2, xend = as.numeric(ReproCat) + 0.2,
+                                       y = mean_value, yend = mean_value), color = "black", size = 1) +
+  geom_text(data = means_norm, aes(x = ReproCat, y = mean_value, label = round(mean_value, 2)),
+            vjust = -0.5, color = "black") +
+  labs(x = "Repro State", y = "Normalized Strength to Category") +
   theme_minimal() +
   theme(legend.position = "none")
+
+#Raw Repro Strength
+means_raw <- clean_affil %>%
+  group_by(ReproCat) %>%
+  summarise(mean_value = mean(repro.strength, na.rm = TRUE))
+
+ggplot(clean_affil, aes(x = ReproCat, y = repro.strength, fill = ReproCat)) +
+  geom_boxplot() +
+  geom_segment(data = means_raw, aes(x = as.numeric(ReproCat) - 0.2, xend = as.numeric(ReproCat) + 0.2,
+                                      y = mean_value, yend = mean_value), color = "black", size = 1) +
+  geom_text(data = means_raw, aes(x = ReproCat, y = mean_value, label = round(mean_value, 2)),
+            vjust = -0.5, color = "black") +
+  labs(x = "Repro State", y = "Raw Repro Strength") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+
+#Scratch
+
+filtered_sightings <- affil_sightings %>% filter(ReproSightings >= 5)
+affil_females <- affil_females %>%
+  filter(Combined.ID %in% filtered_sightings$Combined.ID)
+
+affil_females <- affil_females %>%
+  group_by(Dolphin.ID) %>%
+  mutate(avg.tot.repro.str = mean(repro.strength),
+         norm.repro.indiv = repro.strength / avg.tot.repro.str)
+
+affil_females[] <- lapply(affil_females, function(x) {
+  if (is.list(x)) {
+    sapply(x, toString)
+  } else {
+    x
+  }
+})
+
+write.csv(affil_females, "Outputs/affil_repro_strength.csv", row.names = FALSE)

@@ -123,30 +123,6 @@ merge_repro_str <- merge(sightings, str_repro_df, by.x = "Repro.ID", by.y = "nam
 repro_network <- set_vertex_attr(repro_network, "ReproCat",
                                  value = sightings$ReproCat[match(V(repro_network)$name, sightings$Repro.ID)])
 
-#Setting edge attributes for close kin 
-#Need to have matching Repro.ID column in pairwise 
-repro_network <- set_edge_attr(repro_network, "CloseKin",
-                               value = pairwise$Closekin[match(V(repro_network)$name, pairwise$IDPair)])
-
-#OTHER WAY TO SET VERTEX ATTRIBUTE
-#matched_indices <- match(V(repro_network)$name, sightings$Repro.ID)
-# if (any(is.na(matched_indices))) {
-#   warning("There are unmatched IDs. Please check your data.")
-# } else {
-#   # Set the ReproCat attribute
-#   V(repro_network)$ReproCat <- sightings$ReproCat[matched_indices]
-# }
-
-layout <- layout_with_kk(repro_network)
-
-plot(repro_network, 
-     layout = layout, 
-     vertex.label.dist = 3.5, 
-     vertex.color = as.factor(V(repro_network)$ReproCat))
-
-preg_graph <- induced_subgraph(repro_network, which(V(repro_network)$ReproCat == "preg"))
-plot(preg_graph, layout = layout_with_fr)
-mean(degree(preg_graph))
 
 #########
 ###Age###
