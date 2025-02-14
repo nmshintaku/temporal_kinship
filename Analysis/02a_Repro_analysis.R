@@ -19,11 +19,6 @@ pairwise <- pairwise %>%
 
 dates <- sort(unique(sightings$Observation.Date))
 
-#Adding separate columns for Repro.ID and Age.ID
-sightings <- sightings %>%
-  mutate(Repro.ID = sub("^([^.]+\\.[^.]+).*", "\\1", Combined.ID)) %>%
-  mutate(Age.ID = paste(sub("\\..*", "", Combined.ID), sub(".*\\.(\\w+)$", "\\1", Combined.ID), sep = "."))
-
 # select just genotyped individuals
 
 relatedness <- read.csv("Raw Data/RelatednessEstimates_2024.csv")
@@ -42,72 +37,7 @@ affil_females <- affil_females %>%
   mutate(Repro.ID = sub("^([^.]+\\.[^.]+).*", "\\1", Combined.ID)) %>%
   mutate(Age.ID = paste(sub("\\..*", "", Combined.ID), sub(".*\\.(\\w+)$", "\\1", Combined.ID), sep = "."))
 
-# mask the data so that association rates are only estimated in the timeframe where both members are alive
-affil_mask <- schedulize(affil_females,
-                         id = "Combined.ID",
-                         start = "entrydate",
-                         end = "departdate",
-                         dates = dates,
-                         format = "mask")
-
 affil_sightings <- sightings[which(sightings$Combined.ID %in% affil_females$Combined.ID), ]
-
-#Adding separate columns for Repro.ID and Age.ID
-affil_sightings <- affil_sightings %>%
-  mutate(Repro.ID = sub("^([^.]+\\.[^.]+).*", "\\1", Combined.ID)) %>%
-  mutate(Age.ID = paste(sub("\\..*", "", Combined.ID), sub(".*\\.(\\w+)$", "\\1", Combined.ID), sep = "."))
-
-#Calculating SRI
-masked_network <- simple_ratio(sightings = affil_sightings,
-                               group_variable = "Observation.ID",
-                               dates = "Observation.Date",
-                               IDs = "Combined.ID",
-                               mask = affil_mask)
-
-# For each female reprocat combination, sum up per reprocat and per relatedness cat 
-
-# Create a network object
-
-masked_network[is.nan(masked_network)] <- 0
-masked_network[is.na(masked_network)] <- 0
-
-combined_list <- mat2dat(masked_network, value.name = "weight")
-
-#Set kinship as the edge attribute 
-
-#create list of all pairwise combinations of combined IDs
-
-combined_list$Dolphin.ID1 <- affil_females$Dolphin.ID[match(combined_list$ID1, affil_females$Combined.ID)]
-combined_list$Dolphin.ID2 <- affil_females$Dolphin.ID[match(combined_list$ID2, affil_females$Combined.ID)]
-
-combined_pairs <- merge_pairs(combined_list, pairwise, 
-                              xID1 = "Dolphin.ID1", xID2 = "Dolphin.ID2", 
-                              yID1 = "Dolphin1", yID2 = "Dolphin2", 
-                              all.x = TRUE, all.y = FALSE)
-
-combined_pairs <- combined_pairs[which(combined_pairs$weight!= 0),]
-combined_pairs <- reduce_pairs(combined_pairs, ID1 = "ID1", ID2 = "ID2")
-
-#recreate network from data frame
-
-network <- graph_from_data_frame(combined_pairs[,c("ID1", "ID2", "weight", "DyadML", "Closekin")], 
-                                 directed = FALSE)
-
-kin_graph <- subgraph_from_edges(network, eids = E(network)[E(network)$Closekin == "Y"])
-
-#divide close kin by total strength per individual (female) (and then could normalize after)
-#just raw numbers
-#normalize within kin
-#treating network same way
-
-#might want to look at matrilinearl close kind eventually 
-
-#Calculating kin strength
-str_kin <- strength(kin_graph)
-str_kin_df <- data.frame(name = V(kin_graph)$name, strength = str_kin)
-
-affil_females <- merge(affil_females, str_kin_df, by.x = "Combined.ID", by.y = "name", all.x = TRUE)
-affil_females <- affil_females %>% rename(kin.strength = strength)
 
 
 #########
@@ -139,9 +69,6 @@ str_repro_df <- data.frame(name = V(repro_network)$name, strength = str_repro)
 #Merge repro strength to affil females dataframe
 affil_females <- merge(affil_females, str_repro_df, by.x = "Repro.ID", by.y = "name", all.x = TRUE)
 affil_females <- affil_females %>% rename(repro.strength = strength)
-
-affil_sightings <- merge(affil_sightings, str_repro_df, by.x = "Repro.ID", by.y = "name", all.x = TRUE)
-affil_sightings <- affil_sightings %>% rename(repro.strength = strength)
 
 #Setting vertex attributes to each reproductive category
 repro_network <- set_vertex_attr(repro_network, "ReproCat",
@@ -192,10 +119,6 @@ affil_females$norm_repro[affil_females$norm_repro == "character(0)"] <- NA
 no_unk_affil <- subset(affil_females, ReproCat != "unknown")
 no_unk_affil$norm_repro <- as.numeric(no_unk_affil$norm_repro) 
 
-#Filter out repro sightings >= 5 from affil_sightings
-filtered_sightings <- affil_sightings %>% filter(ReproSightings >= 5)
-no_unk_affil <- no_unk_affil %>%
-  filter(Combined.ID %in% filtered_sightings$Combined.ID)
 
 #STEP 2 Normalizing by individual level
 
@@ -275,3 +198,4 @@ affil_females[] <- lapply(affil_females, function(x) {
 })
 
 write.csv(affil_females, "Outputs/affil_repro_strength.csv", row.names = FALSE)
+

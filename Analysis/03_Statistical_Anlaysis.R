@@ -9,10 +9,7 @@ library(tidyr)
 library(ggplot2)
 library(bisonR)
 library(brms)
-
-#age <- read.csv("Outputs/affil_age_strength.csv")
-#kin <- read.csv("Outputs/affil_kin_strength.csv")
-#repro <- read.csv("Outputs/affil_repro_strength.csv")
+library(multcompView)
 
 indiv_covars <- read.csv("Outputs/individual_covariates.csv")
 indiv_covars$entrydate <- as.Date(indiv_covars$entrydate)
@@ -49,12 +46,17 @@ affil_females <- affil_females %>%
   mutate(Repro.ID = sub("^([^.]+\\.[^.]+).*", "\\1", Combined.ID)) %>%
   mutate(Age.ID = paste(sub("\\..*", "", Combined.ID), sub(".*\\.(\\w+)$", "\\1", Combined.ID), sep = "."))
 
-affil_sightings <- sightings[which(sightings$Combined.ID %in% affil_females$Combined.ID), ]
+#Creating ReproCat column
+extract_state <- function(Repro.ID) {
+  return(sub(".*\\.", "", Repro.ID))
+}
 
-#Filter out repro sightings >= 5 from affil_sightings
-filtered_sightings <- affil_sightings %>% filter(ReproSightings >= 5)
-affil_females <- affil_females %>%
-  filter(Combined.ID %in% filtered_sightings$Combined.ID)
+affil_females$ReproCat <- sapply(affil_females$Repro.ID, extract_state)
+
+affil_females <- affil_females %>% filter(ReproCat != "unknown")
+
+affil_sightings <- sightings[which(sightings$Combined.ID %in% affil_females$Combined.ID), ]
+affil_sightings <- affil_sightings %>% filter(ReproCat != "unknown")
 
 # mask the data so that association rates are only estimated in the timeframe where both members are alive
 affil_mask <- schedulize(affil_females,
@@ -64,15 +66,8 @@ affil_mask <- schedulize(affil_females,
                          dates = dates,
                          format = "mask")
 
-#Creating ReproCat column
-extract_state <- function(Repro.ID) {
-  return(sub(".*\\.", "", Repro.ID))
-}
-
-affil_females$ReproCat <- sapply(affil_females$Repro.ID, extract_state)
-
 #Calculating SRI
-masked_network <- simple_ratio(sightings = filtered_sightings,
+masked_network <- simple_ratio(sightings = affil_sightings,
                                group_variable = "Observation.ID",
                                dates = "Observation.Date",
                                IDs = "Repro.ID",
@@ -159,11 +154,36 @@ summary(fit_edge)
 
 #Run dyadic regression
 dyadic <- bison_brm(
-  bison(edge_weight(ID1, ID2)) ~ DyadML + (1|mm(ID1, ID2)),
+  bison(edge_weight(ID1, ID2)) ~ DyadML,
   fit_edge,
   combined_pairs,
   chains = 2,
   cores = 4
+)
+
+#Running bison simulation model 
+sim_data <- simulate_bison_model("binary", aggregated = TRUE)
+df <- sim_data$df_sim
+
+priors <- get_default_priors("binary_conjugate")
+prior_check(priors, "binary_conjugate")
+priors$edge = "normal(-1, 2.5)"
+fit_edge_sim <- bison_model(
+  (event | duration) ~ dyad(node_1_id, node_2_id),
+  data = df,
+  model_type = "binary_conjugate",
+  priors = priors
+)
+
+df_dyadic <- df %>%
+  distinct(node_1_id, node_2_id, age_diff)
+
+fit_edge_sim <- bison_brm(
+  bison(edge_weight(node_1_id, node_2_id)) ~ age_diff,
+  fit_edge_sim,
+  df, 
+  num_draws = 5,
+  refresh = 0
 )
 
 
@@ -175,6 +195,10 @@ age <- read.csv("Outputs/affil_age_strength.csv")
 kin <- read.csv("Outputs/affil_kin_strength.csv")
 repro <- read.csv("Outputs/affil_repro_strength.csv")
 
+#Filter out Repro category unknown
+repro <- repro %>% filter(ReproCat != "unknown")
+repro <- repro %>%
+  filter(!is.na(norm.repro.indiv) & !is.infinite(norm.repro.indiv))
 
 #Repro ANOVA
 repro_anova <- aov(norm.repro.indiv ~ ReproCat, data = repro)
@@ -183,6 +207,25 @@ plot(repro_anova)
 repro_tukey <- TukeyHSD(repro_anova)
 print(repro_tukey)
 plot(repro_tukey)
+
+means <- repro %>%
+  group_by(ReproCat) %>%
+  summarize(mean_value = mean(norm.repro.indiv))
+#To get group combinations means, add the individual group means and divide by number of groups 
+#Juvenile - cyc = (1.5465586+0.9826508)/2 = 1.264605
+tukey_df <- as.data.frame(repro_tukey$ReproCat)
+tukey_df$comparison <- rownames(tukey_df)
+tukey_df <- tukey_df %>%
+  rename(
+    p_value = `p adj`
+  )
+
+ggplot(tukey_df, aes(x = comparison, y = diff)) +
+  geom_boxplot() +
+  geom_text(data = tukey_df, aes(x = comparison, y = max(repro$norm.repro.indiv) + 0.5, label = round(p_value, 3)), color = "red") +
+  labs(title = "Boxplots with Tukey HSD Results", x = "Reproductive Categories", y = "Values") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 #Close Kin ANOVA
 kin_anova <- aov(DyadML ~ Closekin, data = combined_pairs)
@@ -200,3 +243,39 @@ summary(age_anova)
 plot(age_anova)
 age_tukey <- TukeyHSD(age_anova)
 print(age_tukey)
+
+
+#Repro ANOVA, same state vs different state results
+shared_state <- function(dolphin_id) {
+  return(strsplit(dolphin_id, "\\.")[[1]][2])
+}
+
+# Apply the function to create new columns for states
+repro_combined <- combined_pairs %>%
+  mutate(State1 = sapply(ID1, shared_state),
+         State2 = sapply(ID2, shared_state))
+
+# Check if the states are the same and create the shared_state column
+repro_combined <- repro_combined %>%
+  mutate(shared_state = ifelse(State1 == State2, "Y", "N"))
+
+# Drop the temporary state columns
+repro_combined <- repro_combined %>%
+  select(-State1, -State2)
+
+repro_state <- aov(weight ~ shared_state, data = repro_combined)
+summary(repro_state)
+
+repro_state_interaction <- aov(weight ~ shared_state * Closekin, data = repro_combined)
+summary(repro_state_interaction)
+repro_results <- Anova(repro_state_interaction, type = "II")
+p_value <- repro_results$`Pr(>F)`[1]
+
+ggplot(repro_combined, aes(x = shared_state, y = weight)) +
+  geom_boxplot(outlier.shape = 16, outlier.size = 2) +
+  stat_summary(fun = mean, geom = "point", shape = 16, size = 3, fill = "black") +
+  stat_summary(fun = mean, geom = "text", aes(label = round(..y.., 2)), vjust = -0.5) +
+  labs(x = "Shared State", y = "Weight") +
+  annotate("text", x = 1.5, y = max(repro_combined$weight), label = paste("p-value:", round(p_value, 4)), size = 5, hjust = 0.5) +
+  theme_minimal()
+

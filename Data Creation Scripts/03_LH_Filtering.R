@@ -109,13 +109,21 @@ sightings <- adultF %>%
   mutate(ReproSightings = n()) %>%
   ungroup()
 
-#Making sure to filter individuals with minimum 10 sightings
+#Making sure to filter individuals with minimum 10 total sightings
 sightings <- sightings %>%
   filter(Dolphin.ID %in% filtered_sightings$Dolphin.ID)
 
 #calculate repro sightings per individual
 rs_tab <- table(sightings$Combined.ID)
 sightings$ReproSightings <- rs_tab[match(sightings$Combined.ID, names(rs_tab))]
+
+#Keep repro sightings greater than or equal to 5
+sightings <- sightings %>% filter(ReproSightings >= 5)
+
+#Adding separate columns for Repro.ID and Age.ID
+sightings <- sightings %>%
+  mutate(Repro.ID = sub("^([^.]+\\.[^.]+).*", "\\1", Combined.ID)) %>%
+  mutate(Age.ID = paste(sub("\\..*", "", Combined.ID), sub(".*\\.(\\w+)$", "\\1", Combined.ID), sep = "."))
 
 write.csv(sightings, "Outputs/sightings.csv", row.names = FALSE)
 #write.csv(adultF, "outputs/adultF_filtered.csv", row.names = FALSE)

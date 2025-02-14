@@ -19,11 +19,6 @@ pairwise <- pairwise %>%
 
 dates <- sort(unique(sightings$Observation.Date))
 
-#Adding separate columns for Repro.ID and Age.ID
-sightings <- sightings %>%
-  mutate(Repro.ID = sub("^([^.]+\\.[^.]+).*", "\\1", Combined.ID)) %>%
-  mutate(Age.ID = paste(sub("\\..*", "", Combined.ID), sub(".*\\.(\\w+)$", "\\1", Combined.ID), sep = "."))
-
 # select just genotyped individuals
 
 relatedness <- read.csv("Raw Data/RelatednessEstimates_2024.csv")
@@ -44,17 +39,30 @@ affil_females <- affil_females %>%
 
 affil_sightings <- sightings[which(sightings$Combined.ID %in% affil_females$Combined.ID), ]
 
-#Adding separate columns for Repro.ID and Age.ID
-affil_sightings <- affil_sightings %>%
-  mutate(Repro.ID = sub("^([^.]+\\.[^.]+).*", "\\1", Combined.ID)) %>%
-  mutate(Age.ID = paste(sub("\\..*", "", Combined.ID), sub(".*\\.(\\w+)$", "\\1", Combined.ID), sep = "."))
-
 #Creating AgeCat column
 extract_state <- function(Age.ID) {
   return(sub(".*\\.", "", Age.ID))
 }
 
 affil_females$AgeCat <- sapply(affil_females$Age.ID, extract_state)
+
+#Creating ReproCat column
+extract_repro <- function(Repro.ID) {
+  return(sub(".*\\.", "", Repro.ID))
+}
+
+affil_females$ReproCat <- sapply(affil_females$Repro.ID, extract_repro)
+
+age_sightings <- table(affil_sightings$Age.ID)
+
+affil_females$AgeSightings <- age_sightings[match(affil_females$Age.ID, 
+                                                  names(age_sightings))]
+
+affil_females <- affil_females[which(affil_females$AgeSightings >= 10),]
+affil_females <- affil_females[!duplicated(affil_females$Age.ID),]
+
+affil_sightings <- affil_sightings[which(affil_sightings$Age.ID %in% affil_females$Age.ID),]
+
 
 #########
 ###Age###
@@ -101,11 +109,6 @@ age_network <- set_vertex_attr(age_network, "AgeClass",
 #Age Analysis
 ###############
 
-#Filter out repro sightings >= 5 from affil_sightings
-filtered_sightings <- affil_sightings %>% filter(ReproSightings >= 5)
-affil_females <- affil_females %>%
-  filter(Combined.ID %in% filtered_sightings$Combined.ID)
-
 #Normalize by kin strength divided by total strength
 affil_females$norm.age <- affil_females$age.strength / affil_females$tot.strength
 
@@ -114,6 +117,13 @@ affil_females <- affil_females %>%
   group_by(Dolphin.ID) %>%
   mutate(avg.tot.age.str = mean(age.strength),
          norm.age.indiv = age.strength / avg.tot.age.str)
+
+#Filter out Repro category unknown
+affil_females <- affil_females %>% filter(ReproCat != "unknown")
+
+#No Nan or inf
+affil_females <- affil_females %>%
+  filter(!is.nan(norm.age) & !is.infinite(norm.age))
 
 #write.csv(affil_females, "Outputs/affil_age_strength.csv", row.names = FALSE)
 
@@ -161,4 +171,3 @@ ggplot(affil_females, aes(x = AgeCat, y = norm.age.indiv, fill = AgeCat)) +
   labs(x = "Age State", y = "Normalized Age Strength to Individual") +
   theme_minimal() +
   theme(legend.position = "none")
-
