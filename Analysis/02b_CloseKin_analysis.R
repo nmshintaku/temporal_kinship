@@ -95,6 +95,12 @@ combined_pairs <- reduce_pairs(combined_pairs, ID1 = "ID1", ID2 = "ID2")
 network <- graph_from_data_frame(combined_pairs[,c("ID1", "ID2", "weight", "DyadML", "Closekin")], 
                                  directed = FALSE)
 
+network <- set_vertex_attr(network, "AgeClass",
+                               value = sightings$AgeClass[match(V(network)$name, sightings$Combined.ID)])
+
+network <- set_vertex_attr(network, "ReproCat",
+                                 value = sightings$ReproCat[match(V(network)$name, sightings$Combined.ID)])
+
 kin_graph <- subgraph_from_edges(network, eids = E(network)[E(network)$Closekin == "Y"])
 
 #Read in individual combined ID strength calculation 
@@ -179,3 +185,17 @@ ggplot(affil_females, aes(x = AgeCat, y = norm.kin, fill = AgeCat)) +
   labs(x = "Age Class", y = "Normalized Close Kin Strength") +
   theme_minimal() +
   theme(legend.position = "none")
+
+#plot close kin + pregnant network
+preg_vertex <- V(network)[ReproCat == "preg"]
+preg_graph <- induced.subgraph(network, vids = preg_vertex)
+kin_edges <- E(preg_graph)[Closekin == "Y"]
+kin_preg <- subgraph_from_edges(preg_graph, eids = kin_edges, delete.vertices = TRUE)
+plot(kin_preg, edge.width = E(kin_preg)$weight)
+
+#plot close kin + lact networks
+lact_vertex <- V(network)[ReproCat == "lact"]
+lact_graph <- induced.subgraph(network, vids = lact_vertex)
+kin_edges <- E(lact_graph)[Closekin == "Y"]
+kin_lact <- subgraph_from_edges(lact_graph, eids = kin_edges, delete.vertices = TRUE)
+plot(kin_lact, edge.width = E(kin_lact)$weight)

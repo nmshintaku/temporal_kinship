@@ -178,6 +178,12 @@ ggplot(clean_affil, aes(x = ReproCat, y = repro.strength, fill = ReproCat)) +
   theme(legend.position = "none")
 
 
+#Plotting repro network
+layout <- layout_randomly(repro_network)
+lact_vertex <- V(repro_network)[ReproCat == "lact"]
+repro_lact <- induced.subgraph(repro_network, vids = lact_vertex) 
+plot(repro_lact, layout = layout, vertex.label = V(repro_network)$name)
+
 #Scratch
 
 filtered_sightings <- affil_sightings %>% filter(ReproSightings >= 5)

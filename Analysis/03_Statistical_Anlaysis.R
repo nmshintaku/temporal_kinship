@@ -102,14 +102,24 @@ combined_pairs <- reduce_pairs(combined_pairs, ID1 = "ID1", ID2 = "ID2")
 network <- graph_from_data_frame(combined_pairs[,c("ID1", "ID2", "weight", "DyadML", "Closekin")], 
                                  directed = FALSE)
 
+network <- set_vertex_attr(network, "ReproCat",
+                           value = sightings$ReproCat[match(V(network)$name, sightings$Repro.ID)])
+
 synchrony_graph <- subgraph_from_edges(network, eids = E(network)[E(network)$Closekin == "Y"])
+
+#plot close kin + lact networks
+lact_vertex <- V(network)[ReproCat == "lact"]
+lact_graph <- induced.subgraph(network, vids = lact_vertex)
+kin_edges <- E(lact_graph)[Closekin == "Y"]
+kin_lact <- subgraph_from_edges(lact_graph, eids = kin_edges, delete.vertices = TRUE)
+plot(kin_lact, edge.width = E(kin_lact)$weight)
 
 #################
 #BISoN Regression
 #################
 
 #Run SRI with association = x to get count of times seen together
-pair_count <- simple_ratio(sightings = filtered_sightings,
+pair_count <- simple_ratio(sightings = affil_sightings,
                                group_variable = "Observation.ID",
                                dates = "Observation.Date",
                                IDs = "Repro.ID",
@@ -127,7 +137,7 @@ combined_pairs <- merge_pairs(combined_pairs, pair_count_list,
                               all.x = TRUE, all.y = FALSE)
 
 #Run SRI with association = xy to get total count of joined sightings
-total_count <- simple_ratio(sightings = filtered_sightings,
+total_count <- simple_ratio(sightings = affil_sightings,
                            group_variable = "Observation.ID",
                            dates = "Observation.Date",
                            IDs = "Repro.ID",
@@ -144,6 +154,23 @@ combined_pairs <- merge_pairs(combined_pairs, total_count_list,
                               yID1 = "ID1", yID2 = "ID2", 
                               all.x = TRUE, all.y = FALSE)
 
+### Testing a subset of the data on Bison Model
+#Creating subset of combined pairs to try on the Bison model 
+subset_pairs <- combined_pairs[sample(nrow(combined_pairs), 20), ]
+subset_edge <- bison_model(
+  (pair.count | total.count) ~ dyad(ID1, ID2),
+  data = subset_pairs,
+  model_type = "count")
+
+subset_dyadic <- bison_brm(
+  bison(edge_weight(ID1, ID2)) ~ DyadML,
+  fit_edge,
+  subset_pairs,
+  num_draws = 5,
+  refresh = 0
+)
+
+### Bison model on full dataset
 #Create edge model 
 fit_edge <- bison_model(
   (pair.count | total.count) ~ dyad(ID1, ID2),
@@ -157,11 +184,11 @@ dyadic <- bison_brm(
   bison(edge_weight(ID1, ID2)) ~ DyadML,
   fit_edge,
   combined_pairs,
-  chains = 2,
-  cores = 4
+  num_draws = 5,
+  refresh = 0
 )
 
-#Running bison simulation model 
+###Running bison simulation model 
 sim_data <- simulate_bison_model("binary", aggregated = TRUE)
 df <- sim_data$df_sim
 
@@ -171,8 +198,7 @@ priors$edge = "normal(-1, 2.5)"
 fit_edge_sim <- bison_model(
   (event | duration) ~ dyad(node_1_id, node_2_id),
   data = df,
-  model_type = "binary_conjugate",
-  priors = priors
+  model_type = "count"
 )
 
 df_dyadic <- df %>%
@@ -205,6 +231,7 @@ repro_anova <- aov(norm.repro.indiv ~ ReproCat, data = repro)
 summary(repro_anova)
 plot(repro_anova)
 repro_tukey <- TukeyHSD(repro_anova)
+
 print(repro_tukey)
 plot(repro_tukey)
 
@@ -234,8 +261,15 @@ plot(kin_anova)
 kin_tukey <- TukeyHSD(kin_anova)
 print(kin)
 
-#Need to use combined_pairs (with combined ID) with an age category 
-kin_anova_interaction <- aov(DyadML ~ Closekin * AgeCat, data = )
+#Creating ReproCat column
+extract_age <- function(Age.ID) {
+  return(sub(".*\\.", "", Age.ID))
+}
+
+kin$AgeCat <- sapply(kin$Age.ID, extract_age)
+
+kin_age <- aov(norm.kin ~ AgeCat, data = kin)
+summary(kin_age)
 
 #Age ANOVA
 age_anova <- aov(norm.age ~ AgeCat, data = age)
@@ -243,7 +277,6 @@ summary(age_anova)
 plot(age_anova)
 age_tukey <- TukeyHSD(age_anova)
 print(age_tukey)
-
 
 #Repro ANOVA, same state vs different state results
 shared_state <- function(dolphin_id) {
@@ -279,3 +312,16 @@ ggplot(repro_combined, aes(x = shared_state, y = weight)) +
   annotate("text", x = 1.5, y = max(repro_combined$weight), label = paste("p-value:", round(p_value, 4)), size = 5, hjust = 0.5) +
   theme_minimal()
 
+#Reporting Statistics
+#Number of unique individuals in affil females
+length(unique(affil_females$Dolphin.ID)) #181
+length(unique(affil_sightings$Dolphin.ID)) #181
+
+#Average sighting per dolphin
+average_sightings <- affil_females %>%
+  distinct(Dolphin.ID, .keep_all = TRUE) %>%
+  select(Dolphin.ID, Sightings)
+mean(average_sightings$Sightings) #112
+median(average_sightings$Sightings) #55
+print(IQR(average_sightings$Sightings))
+print(quantile(average_sightings$Sightings))
